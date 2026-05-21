@@ -1,11 +1,28 @@
-# let's install all the packages we will need for this training
+# Before the course, we need to install all the packages 
 
-cran_packages <- c(
-  "devtools", "BiocManager", "lme4", "car", "bestNormalize",
-  "ggplot2", "ggstatsplot", "ScottKnott", "jtools", "drc", "reshape2"
-)
+install.packages(c(
+  "tidyverse",
+  "tidyplots",
+  "janitor",
+  "skimr",
+  "patchwork",
+  "GGally",
+  "desplot",
+  "lme4",
+  "car",
+  "bestNormalize",
+  "ScottKnott",
+  "drc",
+  "jtools",
+  "reshape2",
+  "ggplot2",
+  "ggpubr",
+  "dplyr",
+  "ggstatsplot",
+  "patchwork"
+))
 
-install.packages(cran_packages)
-
-devtools::install_github('famuvie/breedR')
-BiocManager::install("impute")
+# Mixed model package
+install.packages("devtools")
+library(devtools)
+devtools::install_github("famuvie/breedR")

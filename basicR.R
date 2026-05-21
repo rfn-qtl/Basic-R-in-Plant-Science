@@ -3,13 +3,15 @@
 # NCSU
 # Author: Roberto Fritsche-Neto
 # email: roberto.neto@ncsu.edu
-# Last update: June 26, 2025
+# Last update: May 21, 2026
 # =========================================
 
-################################### 1st part ###################################
+################################################################################
 
-# 1. INSTALL AND LOAD PACKAGES 
-# --------------------
+# 1. INSTALLING AND LOADING PACKAGES
+
+################################################################################
+
 # FROM CRAN
 install.packages("devtools")
 install.packages("BiocManager")
@@ -19,485 +21,915 @@ library(devtools)
 devtools::install_github('famuvie/breedR')
 BiocManager::install("impute")
 
-# loading them
+# Load packages ---------------------------------------------------------------
 library(breedR)
+library(tidyverse)
+library(tidyplots)
+library(janitor)
+library(skimr)
+library(patchwork)
+library(GGally)
+library(desplot)
+library(lme4)
+library(car)
+library(bestNormalize)
+library(ScottKnott)
+library(drc)
+library(jtools)
+library(reshape2)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggstatsplot)
+library(patchwork)
 
-# 2. DATA IMPORTATION 
-# --------------------
-# Load dataset from txt
-data <- read.table("data.txt", header = TRUE, na.strings = NA)
-# the missing data usually is NA, but can be any format, more than one
-# data <- read.table("data.txt", header = TRUE, na.strings = c(NA, "."))
-# it will no change your original file
+# you can also use 
+require(ggplot2) # silent way to call the package
+# or call just a specific function using ::
+#Usefull when two different packages have the same functions names
+#snpReady::G.matrix()
 
-# # Load dataset from CSV
-# data <- read.csv("data.csv", header = TRUE, sep = ",")
+################################################################################
 
-# # Load dataset from R file
-# data <- readRDS("data")
+# 2. IMPORTING AND ORGANIZING DATA
 
-head(data)  # view first few rows
-tail(data) # view the last few rows
-dim(data) # dimension of the dataset
+################################################################################
 
-# types of data and preparing your file
-str(data)   # structure of the dataset
+# Import TXT file -------------------------------------------------------------
+
+# header = TRUE means the first row contains column names.
+
+# na.strings defines missing values.
+
+data <- read.table(
+  "data.txt",
+  header = TRUE,
+  na.strings = c("NA", ".")
+)
+
+# Alternative formats ---------------------------------------------------------
+
+# data <- read.csv("data.csv")
+
+# data <- readRDS("data.rds")
+
+# Basic inspection ------------------------------------------------------------
+
+head(data)      # first rows
+head(data, 10)  # first 10 rows
+
+tail(data)      # last rows
+
+dim(data)       # number of rows and columns
+
+names(data)     # variable names
+
+str(data)       # variable classes
+
+# Clean variable names --------------------------------------------------------
+
+# Makes names easier to use in analyses.
+
+data <- clean_names(data)
+
+names(data)
+
+# Convert variables to factors ------------------------------------------------
+
+# Experimental design variables are usually factors.
 
 # adjusting to have only factors and numeric
 data$plot <- as.factor(data$plot)
 str(data)
 # now, doing the same for many cols at the same time
 data[ ,1:9] <- lapply(data[ ,1:9], as.factor)
+
 str(data)
 
-# 2. DESCRIPTIVE ANALYSIS
-# -----------------------
-summary(data)      # general summary
-mean(data$SDM)    # mean of a variable
-sd(data$SDM)      # standard deviation
-boxplot(data$SDM) # boxplot
-cor(data$SDM, data$SRA) # correlation between two traits
-round(cor(data[ ,10:12], use = "pairwise"),2) # correlation among many traits
-heatmap(round(cor(data[ ,10:12], use = "pairwise"),2))
+################################################################################
 
-# doing the same for many traits at the same time
-apply(data[ ,10:12], 2, mean) # 2 apply in col, 1 in rows
+# 3. DESCRIPTIVE ANALYSIS
 
-# check the experimental design and spatial distribution
-library(desplot)
-d1 <- desplot(data, SDM ~ row*col, 
-              out1 = rep, 
-              out2 = N,
-              out2.gpar=list(col = "green", lwd = 1, lty = 1))
+################################################################################
+
+# General summary statistics --------------------------------------------------
+
+summary(data)
+
+# More detailed summary -------------------------------------------------------
+
+skim(data)
+
+# Mean of a trait -------------------------------------------------------------
+
+mean(data$sdm, na.rm = TRUE)
+
+# Standard deviation ----------------------------------------------------------
+
+sd(data$sdm, na.rm = TRUE)
+
+# Coefficient of variation ----------------------------------------------------
+
+cv_sdm <- sd(data$sdm, na.rm = TRUE) /
+  mean(data$sdm, na.rm = TRUE) * 100
+
+cv_sdm
+
+################################################################################
+
+# 4. CORRELATIONS AMONG TRAITS
+
+################################################################################
+
+# Select only numeric variables ----------------------------------------------
+
+num_data <- data[ ,10:12]
+head(num_data)
+
+# more efficient
+str(data)
+sapply(data, is.numeric)
+num_data <- data[ ,sapply(data, is.numeric)]
+head(num_data)
+  
+# Correlation matrix ----------------------------------------------------------
+
+cor_matrix <- cor(num_data, use = "pairwise.complete.obs")
+
+round(cor_matrix, 2)
+
+# Correlation heatmap using tidyplots ----------------------------------------
+
+cor_df <- as.data.frame(as.table(cor_matrix))
+head(cor_df)
+colnames(cor_df)[3] <- "Correlation"
+  
+cor_plot <- cor_df %>%
+  tidyplot(x = Var1, y = Var2, color = Correlation) %>%
+  add_heatmap() %>%
+  add_title("Trait Correlation Among Traits")
+
+cor_plot
+
+################################################################################
+
+# 5. CHECKING THE FIELD DESIGN
+
+################################################################################
+
+# Visualizing spatial distribution in the field -------------------------------
+
+# Useful to detect gradients and experimental problems.
+
+d1 <- desplot(
+  data,
+  sdm ~ row * col,
+  out1 = rep,
+  out2 = n,
+  out2.gpar = list(col = "darkgreen", lwd = 1)
+)
+
 print(d1)
 
-# 3. QUALITY CONTROL
-# -----------------------
-# 3.1 identifying outliers
-boxplot(data$SDM, col = "red")
-#install.packages("lme4")
-library(lme4)
-# outlier detection and elimination
-fit <- lm(SDM ~ type + row + col + N + gid, data = data)
-#install.packages("car")
-library(car)
-(outlier <- names(outlierTest(fit)$p))
-data[outlier, "SDM"] <- NA
+################################################################################
 
+# 6. QUALITY CONTROL
 
-# 3.2 testing for normality
-# First lets check using patterns
-length(data$SDM)
-rnorm(220)
-plot(rnorm(220))
-plot(density(rnorm(220)))
-shapiro.test(rnorm(220)) # normal distribution
-shapiro.test(runif(220)) # uniform distribution
-# then, 
-shapiro.test(data$SDM)
+################################################################################
 
-#install.packages("bestNormalize")
-require(bestNormalize)
-SDMadj <- bestNormalize(data$SDM, standardize = FALSE, allow_orderNorm = TRUE, out_of_sample = FALSE)
-SDMadj$chosen_transform
-shapiro.test(SDMadj$x.t)
-data$SDMadj <- SDMadj$x.t
-head(data)
+# 6.1 Outlier detection -------------------------------------------------------
 
-# What about the residuals?
-# Quartile‐Quartile (Q‐Q) normality plot for residuals
-fit <- lm(SDM ~ type + row + col + N + gid, data = data)
-fit2 <- lm(SDMadj ~ type + row + col + N + gid, data = data)
+# Simple visualization
 
-par(mfrow = c(2,2)) # organize the plot window in 1 row and 2 col
-qqnorm(resid(fit))
-qqline(resid(fit), col = "red")
+data %>%
+  tidyplot(x = type, y = sdm) %>%
+  add_boxplot()
+
+# Linear model for residual inspection ---------------------------------------
+
+fit <- lm(sdm ~ type + row + col + n + gid, data = data)
+
+summary(fit)
+
+# Statistical outlier detection ----------------------------------------------
+
+outlier_test <- outlierTest(fit)
+outlier_test
+
+# Removing outliers -----------------------------------------------------------
+
+# Here we replace outlier observations with NA.
+
+outlier_names <- names(outlier_test$rstudent)
+
+if(length(outlier_names) > 0){
+  data[outlier_names, "sdm"] <- NA
+}
+
+################################################################################
+
+# 6.2 NORMALITY ASSESSMENT
+
+################################################################################
+
+# Histograms help identify asymmetry.
+
+data %>%
+  tidyplot(x = sdm) %>%
+  add_histogram(bins = 20)
+
+# Shapiro-Wilk test -----------------------------------------------------------
+
+# H0 = data are normally distributed.
+
+shapiro.test(na.omit(data$sdm))
+
+# Transformation --------------------------------------------------------------
+
+# bestNormalize automatically searches for better transformations.
+
+sdm_adj <- bestNormalize(
+  data$sdm,
+  standardize = FALSE,
+  allow_orderNorm = TRUE,
+  out_of_sample = FALSE
+)
+
+# Best transformation selected ------------------------------------------------
+
+sdm_adj$chosen_transform
+
+# Store transformed data ------------------------------------------------------
+
+data$sdm_adj <- sdm_adj$x.t
+
+# Test transformed data -------------------------------------------------------
+
+shapiro.test(na.omit(data$sdm_adj))
+
+################################################################################
+
+# 6.3 RESIDUAL DIAGNOSTICS
+
+################################################################################
+
+# Compare original and transformed models ------------------------------------
+
+fit1 <- lm(sdm ~ type + row + col + n + gid, data = data)
+fit2 <- lm(sdm_adj ~ type + row + col + n + gid, data = data)
+
+# QQ-plots -------------------------------------------------------------------
+
+par(mfrow = c(1,2))
+
+qqnorm(resid(fit1))
+qqline(resid(fit1), col = "red")
+
 qqnorm(resid(fit2))
 qqline(resid(fit2), col = "blue")
-hist(data$SDM, col = "red", main = "SDM", xlab = "SDM")
-hist(data$SDMadj, col = "blue", main = "Adjusted SDM", xlab = "Adjusted SDM")
-dev.off()
 
-# 3.3 saving the newest data files
-str(data)
-head(data)
-write.table(data, "data_clean.txt")
-write.csv(data, "data_clean.csv")
+par(mfrow = c(1,1))
 
-# 4. IMPORTANT TYPES OF GRAPHS
-# ----------------------------
-# install.packages("ggplot2")
-library(ggplot2)
+################################################################################
 
-colnames(data)
+# 7. EXPORTING CLEANED DATA
 
-# Histogram
-p1 <- ggplot(data, aes(x = SDM)) + 
-  geom_histogram(bins = 20, fill = "skyblue") +
-  theme_minimal()
+################################################################################
+
+# Save processed datasets -----------------------------------------------------
+
+write.table(data, "data_clean.txt", row.names = FALSE)
+write.csv(data, "data_clean.csv", row.names = FALSE)
+
+################################################################################
+
+# 8. GRAPHICS WITH TIDYPLOTS
+
+################################################################################
+
+# Histogram ------------------------------------------------------------------
+
+p1 <- data %>%
+  tidyplot(x = sdm) %>%
+  add_histogram(bins = 20) %>%
+  add_title("Distribution of SDM")
+
 p1
 
-# Boxplot
-p2 <- ggplot(data, aes(x = type, y = SDM, fill = type)) + 
-  geom_boxplot() +
-  theme_minimal()
+# Boxplot --------------------------------------------------------------------
+
+p2 <- data %>%
+  tidyplot(x = type, y = sdm, color = type) %>%
+  add_boxplot() %>%
+  add_title("SDM across genotypic types")
+
 p2
 
-# Scatter Plot
-p3 <- ggplot(data, aes(x = SRA, y = SDM)) + 
-  geom_point() +
-  geom_smooth(method = "lm") +
-  theme_minimal()
-p3 
-  
-# Bar Plot
-p4 <- ggplot(data, aes(x = type, fill = type)) + 
-  geom_bar() +
-  theme_minimal()
+# Scatter plot with regression line ------------------------------------------
+
+p3 <- data |>
+  tidyplot(x = n, y = sdm, color = gid) |>
+  add_mean_line() |>
+  add_mean_dot() |>
+  add_sem_ribbon()
+
+p3
+
+# Bar plot -------------------------------------------------------------------
+
+p4 <- data %>% 
+  tidyplot(x = type, y = sdm, color = type) %>% 
+  add_mean_bar(alpha = 0.4) %>% 
+  add_sem_errorbar() %>% 
+  add_data_points_beeswarm()
+
 p4
 
-# Line Plot
-ggplot(data, aes(y = SDM, x = N, group = gid, color = gid)) + 
-  geom_line() +
-  theme_minimal()
+# barplot with a t-test
+data |> 
+  tidyplot(x = n, y = sdm, color = n) |> 
+  add_boxplot() |> 
+  add_test_pvalue(ref.group = 1)
 
-# combining and saving graphs
-plot_list <- list(p1, p2, p3, p4)
 
-p_final <- ggstatsplot::combine_plots(
-  plotlist = plot_list,
-  plotgrid.args = list(nrow = 2))
+# Combine figures ------------------------------------------------------------
 
-p_final
+final_plot <- p1 + p2 + p3 + p4
 
-ggsave(filename = './Fig1.pdf',
-       plot = p_final,
-       device = 'pdf',
-       width = 300,
-       height = 300,
-       units = 'mm',
-       dpi = 300)
+final_plot
 
-################################### 2nd part ###################################
+# Save figure ----------------------------------------------------------------
 
-# 5. ANOVA (Analysis of Variance) and comparison tests
-# -----------------------------------------------------
-# 5.1. ANOVA
-# Useful to understand the significance and importance of factors in your response variable
+ggsave(
+  filename = "Figure_1.pdf",
+  plot = final_plot,
+  width = 12,
+  height = 10
+)
 
-# first model
-anova_1 <- aov(SDM ~ gid, data = data)
+
+# NON-PARAMETRIC TESTS AND GRAPHS
+# ----------------------------
+# Contrast ideal and low N or type 
+kruskal.test(sdm ~ n, data = data)
+kruskal.test(sdm ~ type, data = data)
+
+# Create boxplot with Kruskal-Wallis test result shown
+ggstatsplot::ggbetweenstats(
+  data = data,
+  x = n,
+  y = sdm,
+  type = "nonparametric",  # Automatically chooses Kruskal-Wallis for >2 groups
+  pairwise.comparisons = TRUE,
+  pairwise.display = "significant",  # show only significant comparisons
+  p.adjust.method = "BH",            # adjust p-values
+  messages = FALSE
+)
+
+
+################################################################################
+
+# 9. ANALYSIS OF VARIANCE (ANOVA)
+
+################################################################################
+
+# ANOVA evaluates whether treatments differ significantly.
+
+# Simple model ---------------------------------------------------------------
+
+anova_1 <- aov(sdm ~ gid, data = data)
+
 summary(anova_1)
+
 plot(anova_1)
 
-# a more realistic model
-anova_2 <- aov(SDM ~ rep + gid + N + gid*N, data = data)
+# More realistic model -------------------------------------------------------
+
+# Includes replication and interaction effects.
+
+anova_2 <- aov(sdm ~ rep + gid + n + gid:n, data = data)
+
 summary(anova_2)
+
 plot(anova_2)
 
-# estimate CV% and heritability
-summary(anova_2)
+################################################################################
 
-# CV% - it gives us an idea the precision of the whole experiment
-# CV = sqrt(Ve) / mean *100
-Ve <- summary(anova_2)[[1]][5,3]
-CV <- sqrt(Ve) / mean(na.omit(data$SDM)) *100
-CV
+# 9.1 COEFFICIENT OF VARIATION (CV%)
 
-# heritability (fixed model)
-# h2g = Vg / (Vg + Ve/rep) = Vg / Vp
-#it gives us an idea the accuracy of the whole experiment
-# the proportion explained by genonoities, 
-# the correlation between phenotypes and genotypes
-n.reps <- length(unique(data$rep))
-n.reps
-Ve <- summary(anova_2)[[1]][5,3]
-Vg <- (summary(anova_2)[[1]][2,3] - Ve)/n.reps
-h2g <- Vg / (Vg + Ve / n.reps) 
+################################################################################
+
+# CV measures experimental precision.
+
+ve <- summary(anova_2)[[1]][5,3]
+
+cv <- sqrt(ve) /
+  mean(na.omit(data$sdm)) * 100
+
+cv
+
+################################################################################
+
+# 9.2 BROAD-SENSE HERITABILITY
+
+################################################################################
+
+# Heritability estimates the proportion of phenotypic variation
+
+# explained by genetic effects.
+
+n_reps <- length(unique(data$rep))
+
+vg <- (summary(anova_2)[[1]][2,3] - ve) / n_reps
+
+h2g <- vg / (vg + ve / n_reps)
+
 h2g
 
-# 5.2. TUKEY HSD test for factor in the model
-# N levels
-TukeyHSD(anova_2, "N", ordered = TRUE, conf.level=.95)
-plot(TukeyHSD(anova_2, "N", ordered = TRUE,conf.level=.95))
-# genotypes
-TukeyHSD(anova_2, "gid", ordered = TRUE, conf.level=.95)
-plot(TukeyHSD(anova_2, "gid", ordered = TRUE,conf.level=.95))
+################################################################################
 
-# 5.3 SCOTT-KNOTT test
-# --------------------
-#install.packages("ScottKnott")
-library(ScottKnott)
-# Genotypes
-sk1 <- SK(x = anova_2, which = "gid")
-summary(sk1)
-# N levels
-sk2 <- SK(x = anova_2, which = "N")
-summary(sk2)
+# 9.3 TUKEY TEST
 
+################################################################################
 
-# 6. REGRESSIONS
-# --------------------
-# useful to understand the significance and importance of numeric variable to explain your response variable
-colnames(data)
+# Multiple comparison among treatment means.
 
-# 6.1 Linear = y = a + bX + e
-lm_model <- lm(SDM ~ SRA, data = data)
+# Nitrogen levels ------------------------------------------------------------
+
+TukeyHSD(anova_2, "n")
+
+# Genotypes ------------------------------------------------------------------
+
+TukeyHSD(anova_2, "gid")
+
+################################################################################
+
+# 9.4 SCOTT-KNOTT GROUPING
+
+################################################################################
+
+# Widely used in plant breeding.
+
+sk_gid <- SK(anova_2, which = "gid")
+summary(sk_gid)
+
+sk_n <- SK(anova_2, which = "n")
+summary(sk_n)
+
+################################################################################
+
+# 10. REGRESSION ANALYSIS
+
+################################################################################
+
+# Regression models evaluate relationships between variables.
+
+################################################################################
+
+# 10.1 SIMPLE LINEAR REGRESSION
+
+################################################################################
+
+lm_model <- lm(sdm ~ sra, data = data)
+
 summary(lm_model)
-model_summary <- summary(lm_model)
 
-# Access R-squared
-model_summary$r.squared
+# R-squared ------------------------------------------------------------------
 
-# Access coefficients table
-model_summary$coefficients
+summary(lm_model)$r.squared
 
-# creating a simple graph
-plot(data$SRA, data$SDM)
-abline(lm_model, col = "blue")
+# Scatter plot with regression line ------------------------------------------
+
+reg_plot <- data %>%
+  ggplot(aes(x = sra, y = sdm)) +
+  
+  geom_point(alpha = 0.7, size = 2) +
+  
+  geom_smooth(
+    method = "lm",
+    se = TRUE
+  ) +
+  
+  stat_regline_equation(
+    label.x.npc = "left",
+    label.y.npc = 0.95
+  ) +
+  
+  stat_cor(
+    method = "pearson",
+    label.x.npc = "left",
+    label.y.npc = 0.88
+  ) +
+  
+  labs(
+    title = "Relationship between SRA and SDM",
+    x = "SRA",
+    y = "SDM"
+  ) +
+  
+  theme_classic(base_size = 14)
+
+reg_plot
+
+################################################################################
+
+# 10.2 MULTIPLE REGRESSION
+
+################################################################################
+
+multi_model <- lm(sdm ~ sra + nae, data = data)
+
+summary(multi_model)
+
+# Added-variable plots -------------------------------------------------------
+
+avPlots(multi_model)
+
+################################################################################
+
+# 10.3 QUADRATIC REGRESSION
+
+################################################################################
+
+# Useful when responses are nonlinear.
+
+quad_model <- lm(sdm ~ sra + I(sra^2), data = data)
+
+summary(quad_model)
+
+# Generate prediction values -------------------------------------------------
+
+sra_values <- seq(
+  min(data$sra, na.rm = TRUE),
+  max(data$sra, na.rm = TRUE),
+  length.out = 200
+)
+
+pred_data <- data.frame(sra = sra_values)
+
+pred_data$pred <- predict(quad_model, newdata = pred_data)
+
+# Plot quadratic curve -------------------------------------------------------
+
+quad_plot <- ggplot(data, aes(x = sra, y = sdm)) +
+  geom_point(alpha = 0.7, size = 2) +
+  
+  geom_line(
+    data = pred_data,
+    aes(x = sra, y = pred),
+    color = "blue",
+    linewidth = 1
+  ) +
+  
+  labs(
+    title = "Observed vs Predicted Relationship",
+    x = "SRA",
+    y = "SDM"
+  ) +
+  
+  theme_minimal(base_size = 14)
+
+quad_plot
 
 
-# 6.2 Multiple = y = a + b1X1 + b2X2 + ... + e
-# -------------------------
-m_model <- lm(SDM ~ SRA + NAE, data = data)
-summary(m_model)
-model_summary <- summary(m_model)
-# Access R-squared
-model_summary$r.squared
-# Access coefficients table
-model_summary$coefficients
-# creating a simple graph
-library(car)
-#produce added variable plots
-avPlots(m_model)
+################################################################################
 
-# TIPS 
-# using all variables without typing them
-#m_model <- lm(SDM ~ ., data = data)
+# 10.4 LOGISTIC REGRESSION
 
-# 6.3 Quadratic model = y = a + bX + b^2X + e
-data$SRA2 <- data$SRA^2
-qd_model <- lm(SDM ~ SRA + SRA2, data = data)
-summary(qd_model)
+################################################################################
 
-# Plotting
-#create sequence of possible SRA 
-range(data$SRA)
-SRA_Values <- seq(min(data$SRA), max(data$SRA), 0.005)
-#create list of predicted values levels using quadratic model
-SDM_Predict <- predict(qd_model, list(SRA = SRA_Values, SRA2=SRA_Values^2))
-#create scatterplot of original data values
-plot(data$SRA, data$SDM, pch=16)
-#add predicted lines based on quadratic regression model
-lines(SRA_Values, SDM_Predict, col='blue')
+# Logistic regression is used for binary responses.
 
-# 6.4 Logistic - the response variable is TRUE or FALSE (binomial)
-# let's create one in our dataset for levels of N
-data$N
-data$N == "ideal"
-as.numeric(data$N == "ideal")
-data$N_bi <- as.numeric(data$N == "ideal")
-head(data)
+# Create binary variable -----------------------------------------------------
 
-mylogit <- glm(N_bi ~ SDM + SRA + NAE , family = "binomial", data = data)
+data$n_bi <- ifelse(data$n == "ideal", 1, 0)
+
+# Fit model ------------------------------------------------------------------
+
+mylogit <- glm(
+  n_bi ~ sdm + sra + nae,
+  family = "binomial",
+  data = data
+)
+
 summary(mylogit)
+
 anova(mylogit)
-mylogit$coefficients
-library(jtools)
+
 summ(mylogit)
 
-# 6.4 Sigmoidal = y ~ a/(1 + exp(-b * (x-c)) ) + d
-# -----------------------
-# tends to represent the "biology" of things
-library(drc)
-fm <- drm(SDM ~ NAE, data = data, fct = G.3())
-plot(fm)
-summary(fm)
+################################################################################
 
-################################### 3rd part ###################################
+# 10.5 SIGMOIDAL MODEL
 
-# 7. MIXED MODELS
-# ----------------------------
-# modeling better, considering random and fixed effects
-# when it is important?
+################################################################################
 
-library(breedR)
-# for this package we need to "create" a col for the interaction or nested effects 
-data$GxN <- paste0(data$gid, data$N)
-head(data)
+# Sigmoidal models are common in biology.
 
-# using only the classical experimental design
-fit1 <- remlf90(fixed = SDM ~ N,
-             random = ~gid + rep + GxN,
-             data = data)
+sig_model <- drm(sdm ~ nae, data = data, fct = G.3())
 
-# components of variance
-fit1$var
-n.reps <- length(unique(data$rep))
-n.levels <- length(unique(data$N))
+summary(sig_model)
 
-#CV%
-sqrt(fit1$var[4,1]) / mean(na.omit(data$SDM)) *100
+plot(sig_model)
 
-# Broad-sense heritability
-h2g <- fit1$var[1,1] / (fit1$var[1,1] + fit1$var[3,1]/n.levels + fit1$var[4,1]/(n.reps*n.levels))
-h2g
+################################################################################
 
-# Best Linear Unbiased predictions - BLUPS
-# for genotypes
-BLUPs <- fit1$ranef$gid[[1]]
-BLUPs
+# 11. MIXED MODELS
 
-# for the interaction G x N
-GxN <- fit1$ranef$GxN[[1]]
-GxN
+################################################################################
 
-# reliability (r2) = 1 - PEV / (Vg + Vg*Fii)
-# near to heritability
-(r <- mean(1 - BLUPs$s.e.^2 / fit1$var[1,1]))
+# Mixed models allow fixed and random effects simultaneously.
 
-# confidence interval for BLUPS
-DMS <- BLUPs$s.e.*1.96
-blups2 <- data.frame(gid = rownames(BLUPs), BLUPs, "DMS" = DMS)
-head(blups2)
+# Very important in plant breeding.
 
-library(ggplot2)
-limits <- aes(ymax = blups2$value + blups2$DMS,
-              ymin = blups2$value - blups2$DMS)
-p <- ggplot(data = blups2, aes(x = reorder(factor(gid), -value), y = value))
-p + geom_jitter(stat = "identity", colour = "red") +
-  geom_errorbar(limits, position = position_dodge(0.5),
-                width = 0.10) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  labs(x = "gid", y = "BLUP")
+# Create interaction term ----------------------------------------------------
 
-# Comparing models - LRT and AIC
-# to test model factor or compare model, we need to run other models eliminating / including factors 
+data$gxn <- paste0(data$gid, "_", data$n)
 
-# So, let's remove the GxN factor and test if it is significant
-fit2 <- remlf90(fixed = SDM ~ N,
-                random = ~gid + rep,
-                data = data)
+# Mixed model ----------------------------------------------------------------
 
-# how the model is good (AIC) - the smaller, the better the model
-fit1$fit$AIC
-fit2$fit$AIC
+fit_mixed <- remlf90(
+  fixed = sdm ~ n,
+  random = ~ gid + rep + gxn,
+  data = data
+)
 
-# LRT test,
-LRT <- abs(fit1$fit$`-2logL` - fit2$fit$`-2logL`)
-LRT
-pchisq(abs(LRT), 1, lower.tail = F) # chisq test
+# Variance components --------------------------------------------------------
+
+fit_mixed$var
+
+################################################################################
+
+# 11.1 HERITABILITY FROM MIXED MODELS
+
+################################################################################
+
+n_reps <- length(unique(data$rep))
+n_levels <- length(unique(data$n))
+
+h2_mixed <- fit_mixed$var[1,1] /
+  (
+    fit_mixed$var[1,1] +
+      fit_mixed$var[3,1] / n_levels +
+      fit_mixed$var[4,1] / (n_reps * n_levels)
+  )
+
+h2_mixed
+
+################################################################################
+
+# 11.2 BLUPs
+
+################################################################################
+
+# Best Linear Unbiased Predictions.
+
+blups <- fit_mixed$ranef$gid[[1]]
+
+head(blups)
+
+################################################################################
+
+# 11.3 BLUP VISUALIZATION WITH TIDYPLOTS
+
+################################################################################
+# reorganizing the data
+blup_df <- data.frame(
+  gid = rownames(blups),
+  value = blups$value,
+  se = blups$s.e.
+)
+
+# estimating the confidence interval 
+blup_df$dms <- blup_df$se * 1.96
+
+# creating a plot
+blup_plot <- blup_df %>%
+  mutate(gid = reorder(gid, value)) %>%
+  ggplot(aes(x = gid, y = value)) +
+  
+  # confidence interval (thicker, light color)
+  geom_errorbar(
+    aes(ymin = value - dms,
+        ymax = value + dms),
+    width = 0.15,
+    linewidth = 0.6,
+    alpha = 0.7
+  ) +
+  
+  # BLUP points (more visible, centered)
+  geom_point(
+    color = "firebrick",
+    size = 2.2
+  ) +
+  
+  coord_flip() +
+  
+  labs(
+    x = "Genotype (GID)",
+    y = "BLUP",
+    title = "BLUP estimates with uncertainty intervals"
+  ) +
+  
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 7),
+    plot.title = element_text(face = "bold")
+  )
 
 
-# 8. CREATING MY FUNCTIONS
-# ----------------------------
+blup_plot
 
-# first, an example of how to estimate the mean
+################################################################################
+
+# 11.4 MODEL COMPARISON
+
+################################################################################
+
+# Reduced model --------------------------------------------------------------
+
+fit_reduced <- remlf90(
+  fixed = sdm ~ n,
+  random = ~ gid + rep,
+  data = data
+)
+
+# AIC comparison -------------------------------------------------------------
+
+fit_mixed$fit$AIC
+fit_reduced$fit$AIC
+
+# Likelihood ratio test ------------------------------------------------------
+
+lrt <- abs(
+  fit_mixed$fit$`-2logL` -
+    fit_reduced$fit$`-2logL`
+)
+
+pchisq(lrt, 1, lower.tail = FALSE)
+
+################################################################################
+
+# 12. CREATING FUNCTIONS
+
+################################################################################
+
+# Custom functions simplify repetitive tasks.
+
+# Mean function --------------------------------------------------------------
+
 my_mean <- function(x){
-  med <- sum(x) / length(x)
-  return(med)
+  
+  result <- sum(x, na.rm = TRUE) /
+    length(na.omit(x))
+  
+  return(result)
 }
 
-apply(data[,10:12],2, my_mean)
+apply(data[,10:12], 2, my_mean)
 
-# let's create a function to identify if a number is positive, 
-# if not, replace it with 0
+# Positive-value function ----------------------------------------------------
 
 be_positive <- function(x){
-  if(x >= 0){ return(x)} else(0)
-}
-
-aux <- as.matrix(rnorm(10))
-aux
-apply(aux, 1, be_positive)
-
-### CHALLENGE TIME
-# make a function to identify if a number is prime
-x <- 1:10
-
-prime <- function(x){
-
   
-  
-  
+  if(x >= 0){
+    return(x)
+  } else {
+    return(0)
   }
-
-# let's test it
-apply(matrix(x), 1, prime)
-x[apply(matrix(x), 1, prime)]
-
-################################### 4th part ###################################
-
-# 9. USING LOOPS
-# ----------------------------
-# first, a basic example
-x <- rnorm(10)
-x
-
-for (i in 1:length(x)){
-  
-  print(be_positive(x[i]))
-  
 }
 
-# now, we need to reorganize the file
-colnames(data)
-traits <- colnames(data)[10:12]
-traits
+# Example --------------------------------------------------------------------
 
-library(reshape2)
-# reorganize the data
-data.melted <- reshape2::melt(data, measure.vars = traits)
-head(data.melted)
+aux <- rnorm(10)
 
-# create an grid
-grid <- expand.grid(traits) 
-grid
-# more than two can be added to create a grid, for instance:
-grid2 <- expand.grid(trait = traits, N = unique(data$N))
-grid2
+sapply(aux, be_positive)
 
-# create a object to storage all results
-output <- list()
 
-# doing my first loop from scratch - ANOVA for all traits within N levels
-head(data.melted)
-i = 1
 
 ### CHALLENGE TIME
-# now, adjust this loop to add a histogram for each one of the traits and N levels
+# make a function to identify if the median of a vector x
+x <- rnorm(10)
+mean(x)
+
+# median?
+
+
+################################################################################
+
+# 13. LOOPS
+
+################################################################################
+
+# Loops automate repetitive analyses.
+
+traits <- c("sdm", "sra", "nae")
+
+# Empty list to store outputs ------------------------------------------------
 
 output <- list()
-output_figures <- list()
+
+# Loop across traits ---------------------------------------------------------
+
+for(i in traits){
+  
+  formula_i <- as.formula(
+    paste(i, "~ gid + rep")
+  )
+  
+  model_i <- aov(formula_i, data = data)
+  
+  output[[i]] <- summary(model_i)
+}
+
+# Display results ------------------------------------------------------------
+
+output
+
+################################################################################
+
+# 13.1 AUTOMATED HISTOGRAMS
+
+################################################################################
+
+# Generate one histogram per trait.
+
+plot_list <- list()
+
+for(i in traits){
+  
+  p <- data %>%
+    tidyplot(x = .data[[i]]) %>%
+    add_histogram(bins = 20) %>%
+    add_title(paste("Histogram of", i))
+  
+  plot_list[[i]] <- p
+}
+
+# wrap all plots 
+final_plot <- wrap_plots(plot_list, nrow = 1)
+final_plot
 
 
+### CHALLENGE TIME
+# now, combine these loops to deploy all results together
 
+################################################################################
 
-# 10. TIPS AND RESOURCES
-# ----------------------------
+# 14. BEST PROGRAMMING PRACTICES
 
-# 9.1 tips for programming
-# avoid use the same name of already present functions
-# avoid mix capital and small letters
-# try to define a pattern for complex names data.field or data_field
-# always add the last update in the script
-# always have a copy of the main script
-# take care to overwrite files, objects, and/or clean the environment
-# when you clean your environment, you are not changing the script
+################################################################################
 
-# 9.2 graphs
-# https://grafify.shenoylab.com/#intro
-# https://rkabacoff.github.io/datavis/
-# http://www.cookbook-r.com/Graphs/
+# 1. Use meaningful variable names.
 
-# 9.3 R google
-# https://rseek.org/
+# 2. Avoid spaces in object names.
 
-# 9.4 using chatGPT
-# https://chatgpt.com/
-# make a function if a number if cousin
-# improve a graph
+# 3. Prefer snake_case naming.
 
-# ================================
-# THE END 
-# ================================
+# 4. Save intermediate results.
+
+# 5. Comment all important analyses.
+
+# 6. Keep raw data unchanged.
+
+# 7. Build reproducible workflows.
+
+# 8. Always inspect your data before analysis.
+
+# 9. Graph your data before modeling.
+
+# 10. Interpret biological meaning, not only p-values.
+
+################################################################################
+
+# 15. USEFUL RESOURCES
+
+################################################################################
+
+# Data visualization
+
+# [https://grafify.shenoylab.com/](https://grafify.shenoylab.com/)
+
+# [https://rkabacoff.github.io/datavis/](https://rkabacoff.github.io/datavis/)
+
+# [http://www.cookbook-r.com/Graphs/](http://www.cookbook-r.com/Graphs/)
+
+# R search engine
+
+# [https://rseek.org/](https://rseek.org/)
+
+# Tidyverse documentation
+
+# [https://www.tidyverse.org/](https://www.tidyverse.org/)
+
+# Plant breeding statistics
+
+# [https://cran.r-project.org/](https://cran.r-project.org/)
+
+################################################################################
+
+# END OF SCRIPT
+
+################################################################################
